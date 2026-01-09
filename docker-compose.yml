@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: knitting_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-directus}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-directus}
+      POSTGRES_DB: ${DB_DATABASE:-directus}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - knitting_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-directus}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Directus CMS
+  directus:
+    image: directus/directus:latest
+    container_name: knitting_directus
+    restart: unless-stopped
+    ports:
+      - "${DIRECTUS_PORT:-8055}:8055"
+    environment:
+      KEY: ${DIRECTUS_KEY}
+      SECRET: ${DIRECTUS_SECRET}
+      
+      DB_CLIENT: pg
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-directus}
+      DB_USER: ${DB_USER:-directus}
+      DB_PASSWORD: ${DB_PASSWORD:-directus}
+      
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8055}
+      
+      # File storage
+      STORAGE_LOCATIONS: local
+      STORAGE_LOCAL_ROOT: /directus/uploads
+      
+      # Enable CORS for Next.js
+      CORS_ENABLED: true
+      CORS_ORIGIN: ${FRONTEND_URL:-http://localhost:3000}
+    volumes:
+      - directus_uploads:/directus/uploads
+      - directus_extensions:/directus/extensions
+    networks:
+      - knitting_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Meilisearch - Search Engine
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: knitting_meilisearch
+    restart: unless-stopped
+    ports:
+      - "${MEILISEARCH_PORT:-7700}:7700"
+    environment:
+      MEILI_MASTER_KEY: ${MEILISEARCH_MASTER_KEY}
+      MEILI_ENV: ${MEILISEARCH_ENV:-development}
+    volumes:
+      - meilisearch_data:/meili_data
+    networks:
+      - knitting_network
+
+  # PDF Worker (for text extraction)
+  pdf_worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: knitting_pdf_worker
+    restart: unless-stopped
+    environment:
+      DIRECTUS_URL: http://directus:8055
+      DIRECTUS_TOKEN: ${WORKER_TOKEN}
+      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_KEY: ${MEILISEARCH_MASTER_KEY}
+    networks:
+      - knitting_network
+    depends_on:
+      - directus
+      - meilisearch
+    profiles:
+      - worker  # Enable with: docker compose --profile worker up
+
+volumes:
+  postgres_data:
+  directus_uploads:
+  directus_extensions:
+  meilisearch_data:
+
+networks:
+  knitting_network:
+    driver: bridge
