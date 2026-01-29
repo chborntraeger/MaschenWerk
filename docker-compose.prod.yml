@@ -86,9 +86,7 @@ services:
 
   # PDF Worker (for text extraction)
   pdf_worker:
-    build:
-      context: ./worker
-      dockerfile: Dockerfile
+    image: ghcr.io/${GITHUB_USERNAME:-your-username}/maschenwerk-worker:latest
     container_name: maschenwerk_pdf_worker
     restart: unless-stopped
     environment:
@@ -104,9 +102,7 @@ services:
 
   # Next.js Frontend
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/${GITHUB_USERNAME:-your-username}/maschenwerk-frontend:latest
     container_name: maschenwerk_frontend
     restart: unless-stopped
     environment:
