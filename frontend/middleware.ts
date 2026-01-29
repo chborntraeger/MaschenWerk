@@ -9,11 +9,6 @@ export async function middleware(request: NextRequest) {
   if (isAdminRoute) {
     const session = await auth();
     
-    // If session has an error (e.g., RefreshAccessTokenError), redirect to login
-    if (session?.error === 'RefreshAccessTokenError') {
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
-    
     // If no session at all, redirect to login
     if (!session?.user) {
       return NextResponse.redirect(new URL('/login', request.url));

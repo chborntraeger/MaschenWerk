@@ -3,9 +3,9 @@
 import { PatternSearchResult } from '@/lib/meilisearch';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 
-export default function SearchPage() {
+function SearchResults() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
@@ -207,5 +207,17 @@ export default function SearchPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function SearchPage() {
+  return (
+    <Suspense fallback={
+      <div className="container mx-auto px-4 py-12">
+        <div className="text-center">Loading search...</div>
+      </div>
+    }>
+      <SearchResults />
+    </Suspense>
   );
 }
