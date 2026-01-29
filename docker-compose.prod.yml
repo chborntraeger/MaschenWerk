@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: maschenwerk_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - maschenwerk_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Directus CMS
+  directus:
+    image: directus/directus:latest
+    container_name: maschenwerk_directus
+    restart: unless-stopped
+    environment:
+      KEY: ${DIRECTUS_KEY}
+      SECRET: ${DIRECTUS_SECRET}
+      
+      DB_CLIENT: pg
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      
+      PUBLIC_URL: ${DIRECTUS_PUBLIC_URL}
+      
+      # File storage
+      STORAGE_LOCATIONS: local
+      STORAGE_LOCAL_ROOT: /directus/uploads
+      
+      # Enable CORS for Next.js
+      CORS_ENABLED: true
+      CORS_ORIGIN: ${FRONTEND_URL}
+    volumes:
+      - directus_uploads:/directus/uploads
+      - directus_extensions:/directus/extensions
+    networks:
+      - maschenwerk_network
+      - traefik_network  # Traefik Netzwerk
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.directus.rule=Host(`${DIRECTUS_DOMAIN}`)"
+      - "traefik.http.routers.directus.entrypoints=websecure"
+      - "traefik.http.routers.directus.tls.certresolver=letsencrypt"
+      - "traefik.http.services.directus.loadbalancer.server.port=8055"
+
+  # Meilisearch - Search Engine
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: maschenwerk_meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILISEARCH_MASTER_KEY}
+      MEILI_ENV: production
+    volumes:
+      - meilisearch_data:/meili_data
+    networks:
+      - maschenwerk_network
+      - traefik_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.meilisearch.rule=Host(`${MEILISEARCH_DOMAIN}`)"
+      - "traefik.http.routers.meilisearch.entrypoints=websecure"
+      - "traefik.http.routers.meilisearch.tls.certresolver=letsencrypt"
+      - "traefik.http.services.meilisearch.loadbalancer.server.port=7700"
+
+  # PDF Worker (for text extraction)
+  pdf_worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: maschenwerk_pdf_worker
+    restart: unless-stopped
+    environment:
+      DIRECTUS_URL: http://directus:8055
+      DIRECTUS_TOKEN: ${WORKER_TOKEN}
+      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_KEY: ${MEILISEARCH_MASTER_KEY}
+    networks:
+      - maschenwerk_network
+    depends_on:
+      - directus
+      - meilisearch
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: maschenwerk_frontend
+    restart: unless-stopped
+    environment:
+      NEXTAUTH_URL: ${FRONTEND_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      DIRECTUS_URL: ${DIRECTUS_PUBLIC_URL}
+      NEXT_PUBLIC_DIRECTUS_URL: ${DIRECTUS_PUBLIC_URL}
+      NEXT_PUBLIC_MEILISEARCH_URL: ${MEILISEARCH_PUBLIC_URL}
+      MEILISEARCH_KEY: ${MEILISEARCH_MASTER_KEY}
+    networks:
+      - maschenwerk_network
+      - traefik_network
+    depends_on:
+      - directus
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${FRONTEND_DOMAIN}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+
+volumes:
+  postgres_data:
+  directus_uploads:
+  directus_extensions:
+  meilisearch_data:
+
+networks:
+  maschenwerk_network:
+    driver: bridge
+  traefik_network:
+    external: true  # Verwende existierendes Traefik-Netzwerk
