@@ -1,42 +1,17 @@
 # 🚀 CI/CD Setup mit GitHub Actions
 
-Diese Anleitung erklärt, wie du automatisches Bauen und Deployen mit GitHub Actions einrichtest.
+Diese Anleitung erklärt, wie du automatisches Bauen mit GitHub Actions einrichtest.
 
 ## Übersicht
 
 Der Workflow [.github/workflows/build-and-deploy.yml](.github/workflows/build-and-deploy.yml):
 1. **Baut** Frontend und Worker als Docker Images
 2. **Pusht** sie zu GitHub Container Registry (ghcr.io)
-3. **Deployed** automatisch auf deinen Server (optional)
+3. **Watchtower** auf dem Server pulled und deployed automatisch neue Images
 
 ## Setup-Schritte
 
-### 1. GitHub Repository Secrets einrichten
-
-Gehe zu deinem GitHub Repository → Settings → Secrets and variables → Actions
-
-Füge folgende Secrets hinzu:
-
-| Secret Name | Beschreibung | Beispiel |
-|-------------|--------------|----------|
-| `SERVER_HOST` | IP oder Domain deines Servers | `123.45.67.89` oder `showcasehub.de` |
-| `SERVER_USER` | SSH-Username | `root` oder `deploy` |
-| `SERVER_SSH_KEY` | Privater SSH-Key für Server-Zugriff | siehe unten |
-
-#### SSH-Key generieren:
-
-```bash
-# Auf deinem lokalen Rechner
-ssh-keygen -t ed25519 -C "github-actions" -f ~/.ssh/github_actions_key
-
-# Public Key auf Server kopieren
-ssh-copy-id -i ~/.ssh/github_actions_key.pub user@dein-server
-
-# Private Key anzeigen (kopiere diesen Inhalt für GitHub Secret)
-cat ~/.ssh/github_actions_key
-```
-
-### 2. GitHub Packages aktivieren
+### 1. GitHub Packages aktivieren
 
 Die Container Registry ist standardmäßig aktiviert. Stelle sicher, dass:
 - Repository Settings → Actions → General → Workflow permissions: **Read and write permissions** aktiviert ist
@@ -48,7 +23,7 @@ Die Container Registry ist standardmäßig aktiviert. Stelle sicher, dass:
 GITHUB_USERNAME=dein-github-username
 ```
 
-### 4. Images öffentlich machen (optional)
+### 3. Images öffentlich machen (optional)
 
 Damit der Server die Images ohne Login pullen kann:
 
@@ -58,7 +33,9 @@ Damit der Server die Images ohne Login pullen kann:
 
 **Oder** verwende GitHub Token auf dem Server (siehe unten).
 
-### 5. Server vorbereiten
+### 4. Server mit Watchtower vorbereiten
+
+Watchtower überwacht automatisch alle Container und updated sie, wenn neue Images verfügbar sind.
 
 ```bash
 # Auf dem Server
@@ -67,13 +44,27 @@ cd /opt/maschenwerk
 # .env.production mit GITHUB_USERNAME aktualisieren
 nano .env.production
 
-# Optional: Docker login für private Images
+# Für private Images: Docker login einrichten
 docker login ghcr.io -u DEIN-USERNAME -p DEIN-GITHUB-TOKEN
 ```
 
 GitHub Token generieren:
 - GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
 - Generate new token mit `read:packages` Scope
+
+Dein Watchtower sollte die Container überwachen. Typische Watchtower-Konfiguration:
+```yaml
+# In deinem Traefik/Watchtower docker-compose.yml
+watchtower:
+  image: containrrr/watchtower
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ~/.docker/config.json:/config.json  # Für private registry auth
+  environment:
+    - WATCHTOWER_CLEANUP=true
+    - WATCHTOWER_INCLUDE_STOPPED=true
+    - WATCHTOWER_POLL_INTERVAL=300  # Alle 5 Minuten
+```
 
 ## Workflow-Trigger
 
@@ -105,23 +96,21 @@ docker build -t ghcr.io/DEIN-USERNAME/maschenwerk-worker:latest ./worker
 docker push ghcr.io/DEIN-USERNAME/maschenwerk-worker:latest
 
 # Auf Server deployen
-ssh user@server "cd /opt/maschenwerk && docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d"
 ```
 
-## Workflow-Struktur
+Nach dem Push übernimmt Watchtower auf dem Server automatisch das Deployment.
 
-```yaml
-Jobs:
-  1. build-frontend
-     - Checkout Code
-     - Login zu ghcr.io
-     - Build & Push Frontend Image
-  
-  2. build-worker
-     - Checkout Code
-     - Login zu ghcr.io
-     - Build & Push Worker Image
-  
+## Manuelles Deployment
+
+Falls du manuell deployen möchtest (z.B. bei Problemen mit Watchtower):
+
+```bash
+# Auf dem Server
+cd /opt/maschenwerk
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+docker image prune -f
+
   3. deploy (nur bei main branch)
      - SSH zu Server
      - Pull neue Images
@@ -143,14 +132,18 @@ Falls du nicht automatisch deployen möchtest:
 
 ### "Permission denied" beim Push
 
-```bash
-# Repository Settings → Actions → General → Workflow permissions
-# Setze auf: Read and write permissions
-```
-
-### Server kann Images nicht pullen
+```bWatchtower updated nicht
 
 ```bash
+# Auf dem Server: Watchtower Logs prüfen
+docker logs watchtower
+
+# Manuell Images pullen
+cd /opt/maschenwerk
+docker compose -f docker-compose.prod.yml pull
+
+# Prüfe ob neue Images da sind
+docker images | grep maschenwerk
 # Auf dem Server: Docker login
 docker login ghcr.io -u DEIN-USERNAME -p DEIN-GITHUB-TOKEN
 

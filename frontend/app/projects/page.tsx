@@ -12,7 +12,7 @@ export default async function ProjectsPage() {
   // Use authenticated client for admins to see draft projects
   let projects;
   try {
-    if (isAdmin && session?.user?.accessToken && !session.error) {
+    if (isAdmin && session?.user?.accessToken) {
       const { client } = createAuthenticatedClient(session.user.accessToken);
       projects = await client.request(
         readItems('projects', {
